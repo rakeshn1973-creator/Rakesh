@@ -6,10 +6,12 @@ import { formatDictationText } from "../utils/textFormatting";
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const TRANSCRIPTION_MODEL = 'gemini-2.5-flash';
+const VISION_MODEL = 'gemini-2.5-flash'; // Supports images
 const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 export const transcribeAudioFile = async (
   file: File, 
+  learningContext: string = "",
   onProgress?: (msg: string) => void
 ): Promise<string> => {
   try {
@@ -31,6 +33,8 @@ export const transcribeAudioFile = async (
       3. **Filler Words**: Remove all conversational fillers (e.g., "um", "uh", "ah", "like", "you know").
       4. **Medical Accuracy**: Ensure correct spelling of all medical terminology, drug names, and dosages.
       5. **Structure**: Return only the final clean transcription.
+      
+      ${learningContext}
     `;
 
     const response = await ai.models.generateContent({
@@ -54,6 +58,77 @@ export const transcribeAudioFile = async (
     throw new Error(error.message || "Failed to transcribe audio.");
   }
 };
+
+export const extractInvoiceData = async (file: File): Promise<any> => {
+  try {
+    const base64Data = await fileToBase64(file);
+    
+    const prompt = `
+      MODULE NAME: Image-to-Invoice Data Extractor (I2I-Module)
+
+      You are an AI agent designed to extract structured data from uploaded medical or billing images using OCR and intelligent text interpretation.
+
+      Your Tasks:
+      Perform OCR on the uploaded image(s).
+      Detect and extract the following fields from the image content:
+      Sl No, Patient Name, DOB, Address, Contact, Email, Insurance, Membership, Authorisation, Amount
+
+      Apply smart logic:
+      If Insurance is missing → mark as “Self-Pay”.
+      Standardise DOB to DD/MM/YYYY (British format).
+      Fix OCR noise, spacing, and common recognition errors.
+      Capitalise names correctly.
+      
+      Important: Do not extract Comments. The Comments field must always be an empty string because OCR is not accurate enough for this field.
+
+      Output Format:
+      Return results as a single valid JSON object (not markdown, just the JSON string) in the following format:
+      {
+      "Sl No": "",
+      "Patient Name": "",
+      "DOB": "",
+      "Address": "",
+      "Contact": "",
+      "Email": "",
+      "Insurance": "",
+      "Membership": "",
+      "Authorisation": "",
+      "Amount": "",
+      "Comments": ""
+      }
+
+      Behaviour Rules:
+      Never fabricate fields.
+      If uncertain, return an empty string.
+      Always ensure fully structured JSON output.
+      Always leave "Comments" field empty.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: VISION_MODEL,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: file.type,
+              data: base64Data
+            }
+          },
+          { text: prompt }
+        ]
+      }
+    });
+
+    let jsonStr = response.text || "{}";
+    // Sanitize JSON if it comes wrapped in markdown
+    jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    return JSON.parse(jsonStr);
+  } catch (error: any) {
+    console.error("Invoice extraction error:", error);
+    throw new Error("Failed to process image.");
+  }
+}
 
 /**
  * Manages a Live API session for real-time dictation

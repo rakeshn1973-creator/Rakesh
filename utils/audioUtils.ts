@@ -16,6 +16,30 @@ export const fileToBase64 = (file: File): Promise<string> => {
 };
 
 /**
+ * Extract audio duration from a file object.
+ * Returns duration in seconds.
+ */
+export const getAudioDuration = (file: File): Promise<number> => {
+  return new Promise((resolve) => {
+    const audio = document.createElement('audio');
+    const objectUrl = URL.createObjectURL(file);
+    audio.src = objectUrl;
+    
+    audio.onloadedmetadata = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(audio.duration);
+    };
+    
+    // If it fails to load metadata (e.g. not an audio file browser understands natively), 
+    // we resolve to 0 to not block the flow.
+    audio.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(0);
+    };
+  });
+};
+
+/**
  * Format milliseconds to MM:SS
  */
 export const formatTime = (ms: number): string => {

@@ -1,5 +1,5 @@
 {
-  "name": "Copy of DigiMedPro - Transcribe",
+  "name": "DigiMedPro - Transcribe",
   "description": "A medical-grade transcription application leveraging advanced AI for accurate voice-to-text conversion from audio files and real-time dictation.",
   "requestFramePermissions": [
     "microphone"

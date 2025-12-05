@@ -1,5 +1,5 @@
 {
-  "name": "copy-of-digimedpro---transcribe",
+  "name": "digimedpro---transcribe",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,7 +13,11 @@
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "lucide-react": "^0.555.0",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "xlsx": "latest",
+    "docxtemplater": "3.37.11",
+    "pizzip": "3.1.4",
+    "file-saver": "2.0.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
