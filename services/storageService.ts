@@ -190,9 +190,23 @@ export const saveJobRecord = (
   user: User, 
   fileName: string, 
   transcript: string, 
-  audioLengthSeconds: number
+  audioLengthSeconds: number,
+  overrideOwnerId?: string // New Param: If Admin uploads for Doctor
 ): JobRecord => {
   const jobs = getJobs();
+  
+  // Resolve who owns the job
+  let ownerId = user.id;
+  let ownerName = user.fullName;
+
+  if (overrideOwnerId && overrideOwnerId !== user.id) {
+      const allUsers = getUsers();
+      const targetUser = allUsers.find(u => u.id === overrideOwnerId);
+      if (targetUser) {
+          ownerId = targetUser.id;
+          ownerName = targetUser.fullName;
+      }
+  }
   
   // Generate a Job Number: JOB-YYYYMMDD-SEQUENCE
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -202,8 +216,8 @@ export const saveJobRecord = (
   const newJob: JobRecord = {
     id: uuidv4(),
     jobNumber,
-    userId: user.id,
-    userName: user.fullName,
+    userId: ownerId,
+    userName: ownerName,
     fileName,
     uploadDate: Date.now(),
     audioLengthSeconds,

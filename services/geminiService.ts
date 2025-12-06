@@ -74,10 +74,12 @@ export const extractInvoiceData = async (file: File): Promise<any> => {
       Sl No, Patient Name, DOB, Address, Contact, Email, Insurance, Membership, Authorisation, Amount
 
       Apply smart logic:
-      If Insurance is missing → mark as “Self-Pay”.
-      Standardise DOB to DD/MM/YYYY (British format).
-      Fix OCR noise, spacing, and common recognition errors.
-      Capitalise names correctly.
+      - If Insurance is missing → mark as “Self-Pay”.
+      - Standardise DOB to DD/MM/YYYY (British format).
+      - Address: Extract full address on one line if possible, or use \\n for line breaks.
+      - Contact: Extract Phone/Mobile/Tel numbers into this field.
+      - Fix OCR noise, spacing, and common recognition errors.
+      - Capitalise names correctly.
       
       Important: Do not extract Comments. The Comments field must always be an empty string because OCR is not accurate enough for this field.
 

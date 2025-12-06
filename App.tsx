@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import Header from './components/Header';
 import FileUploadView from './components/FileUploadView';
@@ -7,11 +8,13 @@ import ReportingView from './components/ReportingView';
 import UserManagementView from './components/UserManagementView';
 import InvoiceExtractorView from './components/InvoiceExtractorView';
 import MasterDashboard from './components/MasterDashboard';
-import { AppMode, BatchFile, FileStatus, User, InvoiceData } from './types';
-import { transcribeAudioFile } from './services/geminiService';
+import { AppMode, BatchFile, FileStatus, User, InvoiceData, UserRole } from './types';
+import { transcribeAudioFile, extractInvoiceData } from './services/geminiService';
 import { convertFile, needsConversion } from './services/conversionService';
-import { saveJobRecord, loginUser, getLearningContext } from './services/storageService';
-import { getAudioDuration } from './utils/audioUtils';
+import { saveJobRecord, loginUser, getLearningContext, saveUserTemplate, getUsers } from './services/storageService';
+import { getAudioDuration, fileToBase64 } from './utils/audioUtils';
+import { generateWordFromTemplate } from './utils/exportUtils';
+import { v4 as uuidv4 } from 'uuid';
 
 // Simple ID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -62,10 +65,13 @@ const App: React.FC = () => {
   };
   
   const handleUpdateUser = (updatedUser: User) => {
-      setCurrentUser(updatedUser);
+      // If the updated user is the current user, update state
+      if (currentUser && updatedUser.id === currentUser.id) {
+          setCurrentUser(updatedUser);
+      }
   };
 
-  const handleFilesAdded = async (newFiles: File[]) => {
+  const handleFilesAdded = async (newFiles: File[], targetDoctorId?: string) => {
     // Optimistic UI update first with 0 duration
     const tempIds: string[] = [];
     const newBatchFiles: BatchFile[] = [];
@@ -85,7 +91,8 @@ const App: React.FC = () => {
             status: FileStatus.QUEUED,
             progress: 0,
             transcript: '',
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            ownerId: targetDoctorId // If set (by Admin), this tracks who the file belongs to
         };
         newBatchFiles.push(newFileObj);
     }
@@ -162,17 +169,120 @@ const App: React.FC = () => {
               currentUser,
               file.fileName,
               transcript,
-              file.durationSeconds || 0
+              file.durationSeconds || 0,
+              file.ownerId // Pass the explicit owner ID if it exists (for Admin uploads)
           );
+      }
+
+      // Auto-Export Logic
+      // Attempt to find a matching invoice or just use the first available one if user only has one patient
+      // This is a "Best Effort" automation for the "Dragon" workflow
+      // Only runs if we have a template and data
+      
+      const targetUserId = file.ownerId || currentUser?.id;
+      const allUsers = getUsers();
+      const ownerUser = allUsers.find(u => u.id === targetUserId);
+      
+      if (ownerUser && ownerUser.templateBase64 && invoices.length > 0) {
+           // Basic logic: If there is exactly 1 completed invoice, assume it matches this audio
+           // Or if filenames are similar (advanced logic omitted for now)
+           const validInvoice = invoices.find(i => i.status === 'COMPLETED' && i.data);
+           
+           if (validInvoice && validInvoice.data) {
+               console.log("Auto-generating Word document...");
+               const success = generateWordFromTemplate(
+                   ownerUser.templateBase64,
+                   transcript,
+                   validInvoice.data
+               );
+               if (success) {
+                  // Maybe mark file as "Exported"?
+               }
+           }
       }
 
     } catch (error: any) {
       clearInterval(progressInterval);
+      
+      let errorMsg = error.message;
+      if (errorMsg.includes("401") || errorMsg.includes("UNAUTHENTICATED")) {
+          errorMsg = "API Key Invalid/Missing";
+      }
+
       setFiles(prev => prev.map(f => 
-        f.id === fileId ? { ...f, status: FileStatus.ERROR, error: error.message } : f
+        f.id === fileId ? { ...f, status: FileStatus.ERROR, error: errorMsg } : f
       ));
     }
-  }, [currentUser]);
+  }, [currentUser, invoices]); // Added invoices dependency for auto-export
+
+  // Unified Handler for Invoice Images
+  const handleProcessInvoices = async (files: File[]) => {
+    const newInvoices: InvoiceData[] = files.map(f => ({
+      id: uuidv4(),
+      fileName: f.name,
+      status: 'PROCESSING'
+    }));
+
+    setInvoices(prev => [...prev, ...newInvoices]);
+    
+    // We DO NOT auto-switch anymore so user can see audio progress if mixed upload
+    // But we should notify them that images are processing in background
+    if (currentMode === AppMode.UPLOAD) {
+        // Subtle notification or just rely on the "View Extractor (N)" button updating
+    } else {
+        // If we are in another view, maybe we do want to switch? 
+        // For now, let's keep it consistent: stay where you are.
+    }
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const invId = newInvoices[i].id;
+
+        try {
+            const data = await extractInvoiceData(file);
+            
+            setInvoices(prev => {
+                const currentList = [...prev];
+                const index = currentList.findIndex(item => item.id === invId);
+                const slNo = index + 1; 
+
+                if (data) {
+                    data["Sl No"] = slNo.toString();
+                }
+
+                return currentList.map(item => 
+                    item.id === invId 
+                    ? { ...item, status: 'COMPLETED', data: data } 
+                    : item
+                );
+            });
+
+        } catch (err: any) {
+            setInvoices(prev => prev.map(item => 
+                item.id === invId 
+                ? { ...item, status: 'ERROR', error: err.message } 
+                : item
+            ));
+        }
+    }
+  };
+
+  // Unified Handler for Template Uploads
+  const handleUploadTemplate = async (file: File) => {
+    if (!currentUser) return;
+    
+    try {
+        const base64 = await fileToBase64(file);
+        const updatedUser = saveUserTemplate(currentUser.id, base64);
+        if (updatedUser) {
+            setCurrentUser(updatedUser);
+            alert("Template updated successfully!");
+        }
+    } catch (err) {
+        alert("Failed to upload template.");
+        console.error(err);
+    }
+  };
 
   // Queue Monitor
   useEffect(() => {
@@ -206,6 +316,8 @@ const App: React.FC = () => {
                 <FileUploadView 
                     files={files}
                     onFilesAdded={handleFilesAdded}
+                    onImagesAdded={handleProcessInvoices}
+                    onTemplateUploaded={handleUploadTemplate}
                     onRemoveFile={handleRemoveFile}
                     onSelectFile={setSelectedFileId}
                     selectedFileId={selectedFileId}
@@ -213,6 +325,8 @@ const App: React.FC = () => {
                     isProcessing={isQueueActive}
                     invoices={invoices}
                     currentUser={currentUser}
+                    availableDoctors={getUsers().filter(u => u.role === UserRole.DOCTOR)} // Pass available doctors for Admin
+                    onNavigate={setMode}
                 />
               );
           case AppMode.LIVE:
@@ -225,12 +339,19 @@ const App: React.FC = () => {
           case AppMode.REPORTS:
               return <ReportingView />;
           case AppMode.USERS:
-              return <UserManagementView currentUser={currentUser} onUserUpdate={handleUpdateUser} />;
+              return (
+                <UserManagementView 
+                    currentUser={currentUser} 
+                    onUserUpdate={handleUpdateUser} 
+                    onExit={() => setMode(AppMode.MASTER_DASHBOARD)}
+                />
+              );
           case AppMode.INVOICE_EXTRACTOR:
               return (
                 <InvoiceExtractorView 
                     invoices={invoices} 
-                    setInvoices={setInvoices} 
+                    setInvoices={setInvoices}
+                    onProcessInvoices={handleProcessInvoices}
                 />
               );
           case AppMode.MASTER_DASHBOARD:

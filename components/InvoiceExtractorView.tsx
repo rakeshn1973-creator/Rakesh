@@ -1,65 +1,21 @@
 import React, { useRef, useState } from 'react';
 import { UploadCloud, FileImage, Download, Plus, Loader2, AlertCircle, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { InvoiceData } from '../types';
-import { extractInvoiceData } from '../services/geminiService';
 import { exportInvoiceToExcel } from '../utils/exportUtils';
-import { v4 as uuidv4 } from 'uuid';
 
 interface InvoiceExtractorViewProps {
   invoices: InvoiceData[];
   setInvoices: React.Dispatch<React.SetStateAction<InvoiceData[]>>;
+  onProcessInvoices: (files: File[]) => void;
 }
 
-const InvoiceExtractorView: React.FC<InvoiceExtractorViewProps> = ({ invoices, setInvoices }) => {
-  const [isProcessing, setIsProcessing] = useState(false);
+const InvoiceExtractorView: React.FC<InvoiceExtractorViewProps> = ({ invoices, setInvoices, onProcessInvoices }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const handleFiles = async (files: File[]) => {
-    const newInvoices: InvoiceData[] = files.map(f => ({
-      id: uuidv4(),
-      fileName: f.name,
-      status: 'PROCESSING'
-    }));
-
-    setInvoices(prev => [...prev, ...newInvoices]);
-    setIsProcessing(true);
-
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const invId = newInvoices[i].id;
-
-        try {
-            const data = await extractInvoiceData(file);
-            
-            setInvoices(prev => {
-                const currentList = [...prev];
-                const index = currentList.findIndex(item => item.id === invId);
-                const slNo = index + 1; 
-
-                data["Sl No"] = slNo.toString();
-
-                return currentList.map(item => 
-                    item.id === invId 
-                    ? { ...item, status: 'COMPLETED', data: data } 
-                    : item
-                );
-            });
-
-        } catch (err: any) {
-            setInvoices(prev => prev.map(item => 
-                item.id === invId 
-                ? { ...item, status: 'ERROR', error: err.message } 
-                : item
-            ));
-        }
-    }
-    setIsProcessing(false);
-  };
-
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      handleFiles(Array.from(e.target.files) as File[]);
+      onProcessInvoices(Array.from(e.target.files) as File[]);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -70,7 +26,7 @@ const InvoiceExtractorView: React.FC<InvoiceExtractorViewProps> = ({ invoices, s
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const filesArray = Array.from(e.dataTransfer.files) as File[];
       const validFiles = filesArray.filter((f: File) => f.type.startsWith('image/'));
-      if (validFiles.length > 0) handleFiles(validFiles);
+      if (validFiles.length > 0) onProcessInvoices(validFiles);
     }
   };
 

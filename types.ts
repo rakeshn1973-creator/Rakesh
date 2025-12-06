@@ -28,6 +28,7 @@ export interface BatchFile {
   transcript: string;
   error?: string;
   createdAt: number;
+  ownerId?: string; // The Doctor this file belongs to
 }
 
 export interface LiveSessionState {

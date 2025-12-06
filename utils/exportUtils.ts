@@ -7,6 +7,11 @@ import FileSaver from 'file-saver';
 // Safe extraction of saveAs whether it's a default function or a named property
 const saveAs = (FileSaver as any).saveAs || FileSaver;
 
+// Safe extraction for PizZip and Docxtemplater constructors
+const PizZipConstructor = (PizZip as any).default || PizZip;
+const DocxtemplaterConstructor = (Docxtemplater as any).default || Docxtemplater;
+
+
 export const downloadText = (filename: string, content: string) => {
   const element = document.createElement("a");
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -128,30 +133,68 @@ const base64ToBinary = (base64: string) => {
   return bytes;
 };
 
+// Helper for "19th September, 2025" format
+const getOrdinalDate = () => {
+    const date = new Date();
+    const day = date.getDate();
+    const month = date.toLocaleString('default', { month: 'long' });
+    const year = date.getFullYear();
+
+    const suffix = ["th", "st", "nd", "rd"];
+    const v = day % 100;
+    const ordinal = day + (suffix[(v - 20) % 10] || suffix[v] || suffix[0]);
+
+    return `${ordinal} ${month}, ${year}`;
+};
+
 export const generateWordFromTemplate = (
     templateBase64: string, 
     transcript: string, 
     invoiceData: any
 ) => {
     try {
-        const zip = new PizZip(base64ToBinary(templateBase64));
-        const doc = new Docxtemplater(zip, {
+        const zip = new PizZipConstructor(base64ToBinary(templateBase64));
+        const doc = new DocxtemplaterConstructor(zip, {
             paragraphLoop: true,
             linebreaks: true,
         });
 
-        // Current British Date
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('en-GB'); // DD/MM/YYYY
+        // Current Dates
+        const dateOrdinal = getOrdinalDate(); // 19th September, 2025
+        const dateShort = new Date().toLocaleDateString('en-GB'); // 19/09/2025
 
-        // Prepare Data Object
-        // Merge invoice fields + Transcript + CurrentDate
+        // Prepare Data Object with Robust Aliases
+        // This ensures {Tel} works even if our data is called {Contact}
+        const rawData = invoiceData || {};
+        
         const data = {
-            ...invoiceData,
+            ...rawData,
+            
+            // Text Content Aliases
             "Body": transcript,
-            "Transcript": transcript, // Alias
-            "CurrentDate": dateStr,
-            "Date": dateStr
+            "Transcript": transcript, 
+            "Report": transcript,
+            "Content": transcript,
+            "Text": transcript,
+            
+            // Date Aliases
+            "Date": dateOrdinal,          // 19th September, 2025
+            "CurrentDate": dateOrdinal,   // 19th September, 2025
+            "ShortDate": dateShort,       // 19/09/2025
+            
+            // Contact Aliases
+            "Tel": rawData.Contact || "",
+            "Phone": rawData.Contact || "",
+            "Mobile": rawData.Contact || "",
+            
+            // Patient Aliases
+            "Patient": rawData["Patient Name"] || "",
+            "Name": rawData["Patient Name"] || "",
+            "PatientName": rawData["Patient Name"] || "",
+            
+            // Address/DOB Aliases
+            "Dob": rawData.DOB || "",
+            "Address": rawData.Address || ""
         };
 
         // Render the document
@@ -165,9 +208,8 @@ export const generateWordFromTemplate = (
 
         // Save
         // Filename: Patient Name_DDMMYYYY.docx
-        // Remove slashes from date for filename safety
-        const safeDate = dateStr.replace(/\//g, '');
-        const patientName = invoiceData["Patient Name"] || "Unknown_Patient";
+        const safeDate = dateShort.replace(/\//g, '');
+        const patientName = data.Patient || "Document";
         const filename = `${patientName}_${safeDate}.docx`;
 
         saveAs(out, filename);
